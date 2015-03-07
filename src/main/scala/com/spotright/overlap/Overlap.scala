@@ -2,62 +2,6 @@ package com.spotright.overlap
 
 import com.spotright.common.lib.PairingHeap
 
-case class UniqIterator[A](iter: BufferedIterator[A]) extends Iterator[A] {
-  def hasNext: Boolean = iter.hasNext
-
-  def next(): A = {
-    var item = iter.head
-
-    while (iter.hasNext && iter.head == item) {
-      item = iter.next()
-    }
-
-    item
-  }
-}
-
-case class FileCC(
-               head: String,
-               mnext: Option[String],
-               name: String,
-               idx: Int,
-               lines: Iterator[String],  // access only via non-mutable FileCC.next
-               counts: Array[Long]  // mutable - number of matches with file at index
-                 ) {
-
-  def isDone: Boolean = head.isEmpty
-
-  def hasNext: Boolean = mnext.isDefined || lines.hasNext
-
-  def next: FileCC = {
-    if (isDone) this
-    else if (mnext.isDefined) this.copy(head = mnext.get, mnext = None)
-    else {
-      var newhead = ""
-
-      while (newhead.isEmpty && lines.hasNext) {
-        newhead = lines.next()
-      }
-
-      var newnext = newhead
-
-      while ((newnext == newhead || newnext.isEmpty) && lines.hasNext) {
-        newnext = lines.next()
-      }
-
-      val newmnext = if (newnext == newhead) None else Some(newnext)
-
-      // If there were no more lines head will end up as "" and mnext as None
-      // If there were one lines then head will be it and mnext as None
-      this.copy(head = newhead, mnext = newmnext)
-    }
-  }
-}
-
-object HeadOnlyOrdering extends Ordering[FileCC] {
-  def compare(a: FileCC, b: FileCC): Int = a.head compare b.head
-}
-
 /**
  * Idea is to keep a priority queue values (by file).  We pull off all matching values from the top of
  * the queue and update the match-counts of those found.  (Pathologic no-match case means update our
@@ -69,8 +13,6 @@ object Overlap {
 
   val usage = "overlap file file ..."
 
-  def log(m: String) = println(s";; $m")
-
   def main(av: Array[String]): Unit = {
 
     require(av.length > 0, usage)
@@ -80,13 +22,12 @@ object Overlap {
         val iter = io.Source.fromFile(fn).getLines().map{_.trim.toLowerCase}.filterNot{_.isEmpty}
         val fcc = FileCC("-", None, fn, idx, UniqIterator(iter.buffered), Array.fill(av.length)(0L) )
 
-        fcc.next
+        fcc.next()
     }
 
-    val ph = PairingHeap.empty()(HeadOnlyOrdering)
-
-    ph ++= files.filterNot{_.isDone}
-
+    val ph =
+      PairingHeap.empty()(FileCC.HeadOnlyOrdering) ++
+        files.filterNot{_.isDone}
 
     while (ph.nonEmpty) {
       val top = ph.dequeue()
@@ -103,7 +44,7 @@ object Overlap {
         top.counts(top.idx) += 1
 
         if (top.hasNext) {
-          val fcc = top.next
+          val fcc = top.next()
           files(top.idx) = fcc
           ph += fcc
         }
@@ -131,7 +72,7 @@ object Overlap {
         // Grab next lines.
         xs.filter{_.hasNext}.foreach {
           x =>
-            val fcc = x.next
+            val fcc = x.next()
             files(x.idx) = fcc
             ph += fcc
         }
