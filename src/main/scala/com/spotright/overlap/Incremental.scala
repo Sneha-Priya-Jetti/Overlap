@@ -14,7 +14,6 @@ object Incremental {
 
   val optParser = new scopt.OptionParser[Opts]("Incremental") {
     opt[String]('b', "base") required() unbounded() valueName "<file>" text "Files to report against." action {case (v, c) => c.copy(base = c.base :+ v)}
-    opt[Unit]("counts") text "Show counts instead of percents." action {case (v, c) => c.copy(counts = true)}
     arg[String]("<file>") unbounded() text "Files forming the ladder." action {case (v, c) => c.copy(ladder = c.ladder :+ v)}
   }
 
@@ -27,7 +26,7 @@ object Incremental {
    */
   def main(av: Array[String]): Unit = {
     val opts = optParser.parse(av, Opts.empty).fold(sys.exit(1))(identity)
-    val numf = if (opts.counts) asCount _ else asPercent _
+    var numf = asPercent _
 
     // The count powerset.  Keys are a set of the ladder indexes that matched.
     val psets = Array.fill(opts.base.length){Map.empty[Set[Int],Long]}
@@ -47,7 +46,7 @@ object Incremental {
         val iter = io.Source.fromFile(fn).getLines().map {_.trim.toLowerCase}.filterNot {_.isEmpty}
 
         // We won't be keeping a count in this FileCC so `counts` set to size 0
-        val fcc = FileCC("-", None, fn, idx, UniqIterator(iter.buffered), Array.fill(0)(0L))
+        val fcc = FileCC("-", None, fn, idx, UniqIterator(iter.buffered), Array.fill(1)(0L))
 
         fcc.next()
     }
@@ -81,7 +80,7 @@ object Incremental {
         (top :: toIncr).map {
           fcc =>
             // catch and release
-            base(fcc.idx).counts(0) += 1
+            base(fcc.idx).counts(0) += 1L
             if (fcc.hasNext) qbase += fcc.next()
 
             fcc.idx
@@ -90,6 +89,7 @@ object Incremental {
       // ladder matches
       while (qladder.nonEmpty && qladder.inspect().head < top.head) {
         val qtop = qladder.dequeue()
+        ladder(qtop.idx).counts(0) += 1L
         if (qtop.hasNext) qladder += qtop.next()
       }
 
@@ -100,7 +100,9 @@ object Incremental {
           val bldr = List.newBuilder[FileCC]
 
           while (qladder.nonEmpty && qladder.inspect().head == top.head) {
-            bldr += qladder.dequeue()
+            val elt = qladder.dequeue()
+            ladder(elt.idx).counts(0) += 1L
+            bldr += elt
           }
 
           bldr.result()
@@ -131,10 +133,12 @@ object Incremental {
     // ladder2      submatch% submatch%
 
     // We'll emit as a CSV to suck into google sheets
+    val emptySuffix = s"${base.map{_ => ""}.mkString(",")}"
+    val emptyLine = s",$emptySuffix"
 
     println(s",${base.map{_.name}.mkString(",")}")
     println(s",${base.map{_.counts(0)}.mkString(",")}")
-    println(s",${base.map{_ => ""}.mkString(",")}")
+    println(emptyLine)
 
     val totals = Array.fill(opts.base.length)(0L)
 
@@ -153,7 +157,51 @@ object Incremental {
     }
 
     println(s",${base.map{_ => ""}.mkString(",")}")
-    println(f"total,${numf(totals(0), base(0).counts(0))},${numf(totals(1), base(1).counts(0))}")
+
+    val totalsPCStr = base.indices.map{i => numf(totals(i), base(i).counts(0))}.mkString(",")
+    println(s"total,$totalsPCStr")
+    println(emptyLine)
+    println(emptyLine)
+
+    println(s"by Count,$emptySuffix")
+
+    numf = asCount
+
+    ladder.foreach {
+      fcc =>
+        // ladder count at this run against the proper base file as a percent of base files size
+        val lms = psets.zipWithIndex.map {
+          case (pset, idx) =>
+            val lm = ladderMatch(fcc.idx, pset)
+
+            // Do not re-add lm into totals
+
+            numf(lm, base(idx).counts(0))
+        }
+
+        println(s"${fcc.name},${lms.mkString(",")}")
+    }
+
+    println(s",${base.map{_ => ""}.mkString(",")}")
+
+    val totalsCountStr = base.indices.map{i => numf(totals(i), base(i).counts(0))}.mkString(",")
+    println(s"total,$totalsCountStr")
+    println(emptyLine)
+    println(emptyLine)
+
+    while (qladder.nonEmpty) {
+      val top = qladder.dequeue()
+      ladder(top.idx).counts(0) += 1L
+
+      if (top.hasNext)
+        qladder += top.next
+    }
+
+    println(s"size,$emptySuffix")
+    ladder.foreach {
+      fcc =>
+        println(s"${fcc.name},${fcc.counts(0)}")
+    }
   }
 
   def asPercent(n: Long, d: Long): String = (n.toDouble / d * 100.0).formatted("%.2f%%")
