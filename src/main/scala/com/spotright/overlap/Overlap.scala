@@ -20,7 +20,7 @@ object Overlap {
     val files = av.zipWithIndex.map {
       case (fn, idx) =>
         val iter = io.Source.fromFile(fn).getLines().map{_.trim.toLowerCase}.filterNot{_.isEmpty}
-        val fcc = FileCC("-", None, fn, idx, UniqIterator(iter.buffered), Array.fill(av.length)(0L) )
+        val fcc = FileCC("-", None, new java.io.File(fn).getName, idx, UniqIterator(iter.buffered), Array.fill(av.length)(0L) )
 
         fcc.next()
     }

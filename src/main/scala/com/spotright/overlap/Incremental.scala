@@ -36,7 +36,7 @@ object Incremental {
         val iter = io.Source.fromFile(fn).getLines().map {_.trim.toLowerCase}.filterNot {_.isEmpty}
 
         // We only ever count our own lines so `counts` set to size 1
-        val fcc = FileCC("-", None, fn, idx, UniqIterator(iter.buffered), Array.fill(1)(0L))
+        val fcc = FileCC("-", None, new java.io.File(fn).getName, idx, UniqIterator(iter.buffered), Array.fill(1)(0L))
 
         fcc.next()
     }
